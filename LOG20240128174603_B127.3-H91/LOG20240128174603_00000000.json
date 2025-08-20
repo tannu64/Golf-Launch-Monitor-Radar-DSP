@@ -1,0 +1,12 @@
+﻿{
+  "Movie File": "",
+  "createTime": "",
+  "FileNameBin": "LOG20240128174603_00000000.bin",
+  "createTimeBin": "2024/01/28 17:46:03.499",
+  "samplingFreq": "22.7kHz",
+  "speedCoef": 0.1388888888888889,
+  "dataStep": 64,
+  "fftNum": 1024,
+  "binFile_DataArray": "IF1 Upper,IF1 Lower,IF2 Upper,IF2 Lower",
+  "dataMode": "Seamless"
+}
