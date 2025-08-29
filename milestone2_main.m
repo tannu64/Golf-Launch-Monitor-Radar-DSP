@@ -229,10 +229,11 @@ function debug_track_structures(enhanced_results)
 fprintf('\n=== TRACK STRUCTURE DEBUGGING ===\n');
 
 for shot_idx = 1:length(enhanced_results)
-    fprintf('\nShot %d: %s\n', shot_idx, enhanced_results{shot_idx}.shot_name);
+    shot_name = enhanced_results{shot_idx}.shot_info.folder_name;
+    fprintf('\nShot %d: %s\n', shot_idx, shot_name);
     
-    if isfield(enhanced_results{shot_idx}, 'smoothed_tracks')
-        tracks = enhanced_results{shot_idx}.smoothed_tracks;
+    if isfield(enhanced_results{shot_idx}, 'advanced_tracks')
+        tracks = enhanced_results{shot_idx}.advanced_tracks;
         fprintf('  Found %d smoothed tracks\n', length(tracks));
         
         if length(tracks) > 0

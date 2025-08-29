@@ -374,8 +374,6 @@ end
 
 end
 
-end
-
 function category_analysis = analyze_by_shot_type_m2(ball_est, club_est, ball_ref, club_ref, shot_types)
 %% Enhanced category analysis for M2
 
