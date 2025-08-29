@@ -195,8 +195,12 @@ save('milestone2_summary.mat', 'm2_summary');
 
 fprintf('✓ Results saved to milestone2_results.mat\n');
 
-%% Step 9: Generate Visualizations (Optional)
-fprintf('\nStep 9: Creating Milestone 2 visualizations...\n');
+%% Step 9: Debug track structures
+fprintf('Step 9: Debugging track structures...\n');
+debug_track_structures(enhanced_results);
+
+%% Step 10: Generate Visualizations (Optional)
+fprintf('\nStep 10: Creating Milestone 2 visualizations...\n');
 
 try
     % Create M2-specific plots
@@ -215,6 +219,62 @@ else
     fprintf('- Debug and improve velocity accuracy\n');
     fprintf('- Adjust CFAR and tracking parameters\n');
     fprintf('- Re-run analysis after improvements\n');
+end
+
+%% Debugging Functions
+function debug_track_structures(enhanced_results)
+%% Debug function to analyze track structures and identify data format issues
+% This function helps diagnose why velocity extraction is failing
+
+fprintf('\n=== TRACK STRUCTURE DEBUGGING ===\n');
+
+for shot_idx = 1:length(enhanced_results)
+    fprintf('\nShot %d: %s\n', shot_idx, enhanced_results{shot_idx}.shot_name);
+    
+    if isfield(enhanced_results{shot_idx}, 'smoothed_tracks')
+        tracks = enhanced_results{shot_idx}.smoothed_tracks;
+        fprintf('  Found %d smoothed tracks\n', length(tracks));
+        
+        if length(tracks) > 0
+            % Analyze first track structure
+            track1 = tracks(1);
+            fprintf('  Track 1 fields: %s\n', strjoin(fieldnames(track1), ', '));
+            
+            % Check velocity-related fields
+            velocity_fields = {'mean_velocity', 'smoothed_velocity', 'velocity_data', 'detections'};
+            for field = velocity_fields
+                if isfield(track1, field{1})
+                    field_data = track1.(field{1});
+                    fprintf('  %s: type=%s, size=%s, empty=%s\n', ...
+                        field{1}, class(field_data), mat2str(size(field_data)), mat2str(isempty(field_data)));
+                    
+                    % If it's a struct, show its fields
+                    if isstruct(field_data) && ~isempty(field_data)
+                        fprintf('    Sub-fields: %s\n', strjoin(fieldnames(field_data), ', '));
+                    end
+                else
+                    fprintf('  %s: NOT FOUND\n', field{1});
+                end
+            end
+            
+            % Check quality-related fields
+            quality_fields = {'quality_score', 'num_detections', 'duration', 'max_magnitude'};
+            for field = quality_fields
+                if isfield(track1, field{1})
+                    field_data = track1.(field{1});
+                    fprintf('  %s: type=%s, value=%s\n', ...
+                        field{1}, class(field_data), mat2str(field_data));
+                else
+                    fprintf('  %s: NOT FOUND\n', field{1});
+                end
+            end
+        end
+    else
+        fprintf('  No smoothed_tracks field found\n');
+    end
+end
+
+fprintf('\n=== END TRACK STRUCTURE DEBUGGING ===\n');
 end
 
 function create_milestone2_plots(enhanced_results, validation, config)

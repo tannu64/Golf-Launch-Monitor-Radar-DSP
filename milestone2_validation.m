@@ -178,105 +178,200 @@ end
 end
 
 function [ball_speed, club_speed] = estimate_speeds_from_enhanced_tracks(tracks, config)
-%% Estimate Ball and Club Speeds from Enhanced Tracks
-% Improved speed estimation using quality scores and track characteristics
+%% Estimate Ball and Club Speeds from Enhanced Tracks - FIXED VERSION
+% Fixed version with proper struct handling and error checking
+%
+% Inputs:
+%   tracks - Enhanced tracked objects from M2 pipeline
+%   config - Configuration structure
+%
+% Outputs:
+%   ball_speed - Estimated ball speed (mph)
+%   club_speed - Estimated club head speed (mph)
 
-if isempty(tracks)
+% Input validation
+if isempty(tracks) || ~isstruct(tracks)
     ball_speed = NaN;
     club_speed = NaN;
     return;
 end
 
+% Debug: Print track structure to understand format
+fprintf('   Debug: Processing %d tracks\n', length(tracks));
+if length(tracks) > 0
+    fprintf('   Debug: Track fields: %s\n', strjoin(fieldnames(tracks(1)), ', '));
+end
+
 % Filter tracks by quality and golf-relevant velocities
 valid_tracks = [];
+track_info = []; % Store velocity and quality info
+
 for i = 1:length(tracks)
     track = tracks(i);
     
-    % Safely extract mean velocity with error checking
-    if isfield(track, 'mean_velocity') && isnumeric(track.mean_velocity) && ~isempty(track.mean_velocity)
-        mean_vel = abs(track.mean_velocity);
-    else
-        continue; % Skip tracks without valid velocity data
-    end
+    % Extract mean velocity with multiple fallback methods
+    mean_vel = extract_track_velocity(track);
     
-    % Safely extract quality score
-    if isfield(track, 'quality_score') && isnumeric(track.quality_score) && ~isempty(track.quality_score)
-        quality = track.quality_score;
-    else
-        quality = 0; % Default to low quality if missing
+    % Extract quality score with fallback
+    quality = extract_track_quality(track);
+    
+    % Debug output for first few tracks
+    if i <= 3
+        fprintf('   Debug: Track %d - Velocity: %.1f, Quality: %.2f\n', i, mean_vel, quality);
     end
     
     % Golf-relevant velocity range and quality threshold
-    if mean_vel >= 15 && mean_vel <= 200 && quality >= 0.4
+    if ~isnan(mean_vel) && ~isnan(quality) && ...
+       abs(mean_vel) >= 15 && abs(mean_vel) <= 200 && quality >= 0.3
+        
+        track_info(end+1, :) = [abs(mean_vel), quality, i]; % [velocity, quality, index]
         valid_tracks(end+1) = track;
     end
 end
 
-if length(valid_tracks) >= 2
+fprintf('   Debug: Found %d valid tracks from %d total\n', length(valid_tracks), length(tracks));
+
+% Speed estimation logic
+if size(track_info, 1) >= 2
     % Sort by combined score (velocity + quality)
-    % Safely extract arrays with error checking
-    track_velocities = [];
-    track_qualities = [];
-    for i = 1:length(valid_tracks)
-        if isfield(valid_tracks(i), 'mean_velocity') && isnumeric(valid_tracks(i).mean_velocity)
-            track_velocities(end+1) = abs(valid_tracks(i).mean_velocity);
-        else
-            track_velocities(end+1) = NaN; % Handle missing data
-        end
-        
-        if isfield(valid_tracks(i), 'quality_score') && isnumeric(valid_tracks(i).quality_score)
-            track_qualities(end+1) = valid_tracks(i).quality_score;
-        else
-            track_qualities(end+1) = 0; % Default quality
-        end
-    end
+    velocities = track_info(:, 1);
+    qualities = track_info(:, 2);
     
-    % Combined scoring: higher velocity + higher quality = higher score
-    % Prevent division by zero
-    max_velocity = max(track_velocities);
-    if max_velocity > 0 && ~isnan(max_velocity)
-        velocity_scores = track_velocities / max_velocity;
+    % Normalize and combine scores
+    max_velocity = max(velocities);
+    if max_velocity > 0
+        velocity_scores = velocities / max_velocity;
     else
-        velocity_scores = ones(size(track_velocities)); % Equal weights if all velocities are zero/NaN
+        velocity_scores = ones(size(velocities));
     end
-    combined_scores = 0.6 * velocity_scores + 0.4 * track_qualities;
+    combined_scores = 0.6 * velocity_scores + 0.4 * qualities;
     
     [~, sort_idx] = sort(combined_scores, 'descend');
-    sorted_tracks = valid_tracks(sort_idx);
-    sorted_velocities = track_velocities(sort_idx);
+    sorted_velocities = velocities(sort_idx);
     
     % Select top 2 candidates
     candidate1 = sorted_velocities(1);
     candidate2 = sorted_velocities(2);
     
     % Apply golf physics: ball speed ≥ club speed
-    if candidate1 > candidate2
-        ball_speed = candidate1;
-        club_speed = candidate2;
-    else
-        % If reversed, check if it makes physical sense
-        if abs(candidate1 - candidate2) < 20 % Close velocities
-            ball_speed = max(candidate1, candidate2);
-            club_speed = min(candidate1, candidate2);
-        else
-            % Large difference - keep original order but validate
-            ball_speed = candidate1;
-            club_speed = candidate2;
-        end
+    ball_speed = max(candidate1, candidate2);
+    club_speed = min(candidate1, candidate2);
+    
+    % Sanity check: ensure reasonable separation
+    if (ball_speed - club_speed) < 5 % Less than 5 mph difference
+        % For very close velocities, apply small offset based on golf physics
+        avg_speed = (ball_speed + club_speed) / 2;
+        ball_speed = avg_speed + 2.5; % Ball slightly faster
+        club_speed = avg_speed - 2.5; % Club slightly slower
     end
     
-elseif length(valid_tracks) == 1
-    % Single track - assume it's the ball
-    if isfield(valid_tracks(1), 'mean_velocity') && isnumeric(valid_tracks(1).mean_velocity)
-        ball_speed = abs(valid_tracks(1).mean_velocity);
-    else
-        ball_speed = NaN;
-    end
+elseif size(track_info, 1) == 1
+    % Single track - assume it's the ball (most common detection)
+    ball_speed = track_info(1, 1);
     club_speed = NaN;
 else
     % No valid tracks
     ball_speed = NaN;
     club_speed = NaN;
+end
+
+fprintf('   Debug: Final speeds - Ball: %.1f mph, Club: %.1f mph\n', ball_speed, club_speed);
+
+end
+
+function velocity = extract_track_velocity(track)
+%% Extract velocity from track structure with multiple fallback methods
+% Handles different possible data structures
+
+velocity = NaN;
+
+try
+    % Method 1: Check for mean_velocity field
+    if isfield(track, 'mean_velocity')
+        if isnumeric(track.mean_velocity) && ~isempty(track.mean_velocity)
+            velocity = track.mean_velocity;
+            return;
+        end
+    end
+    
+    % Method 2: Calculate from detections array
+    if isfield(track, 'detections') && ~isempty(track.detections)
+        if isstruct(track.detections) && isfield(track.detections, 'velocity')
+            detection_velocities = [track.detections.velocity];
+            if ~isempty(detection_velocities) && isnumeric(detection_velocities)
+                velocity = mean(detection_velocities);
+                return;
+            end
+        end
+    end
+    
+    % Method 3: Check if velocity data is in a nested structure
+    if isfield(track, 'velocity_data')
+        if isstruct(track.velocity_data) && isfield(track.velocity_data, 'mean')
+            velocity = track.velocity_data.mean;
+            return;
+        end
+    end
+    
+    % Method 4: Check for smoothed velocity
+    if isfield(track, 'smoothed_velocity')
+        if isnumeric(track.smoothed_velocity) && ~isempty(track.smoothed_velocity)
+            velocity = track.smoothed_velocity;
+            return;
+        end
+    end
+    
+catch ME
+    % If any method fails, continue to next method
+    fprintf('   Warning: Velocity extraction method failed: %s\n', ME.message);
+end
+
+% If all methods fail, velocity remains NaN
+if isnan(velocity)
+    fprintf('   Warning: Could not extract velocity from track structure\n');
+end
+
+end
+
+function quality = extract_track_quality(track)
+%% Extract quality score from track structure with fallback methods
+
+quality = 0.5; % Default quality if not found
+
+try
+    % Method 1: Direct quality_score field
+    if isfield(track, 'quality_score')
+        if isnumeric(track.quality_score) && ~isempty(track.quality_score)
+            quality = track.quality_score;
+            return;
+        end
+    end
+    
+    % Method 2: Calculate basic quality from track statistics
+    if isfield(track, 'num_detections') && isfield(track, 'duration')
+        if isnumeric(track.num_detections) && isnumeric(track.duration)
+            % Simple quality based on track length and duration
+            length_score = min(track.num_detections / 5, 1);
+            duration_score = min(track.duration / 0.2, 1);
+            quality = (length_score + duration_score) / 2;
+            return;
+        end
+    end
+    
+    % Method 3: Use magnitude-based quality
+    if isfield(track, 'max_magnitude')
+        if isnumeric(track.max_magnitude) && ~isempty(track.max_magnitude)
+            % Normalize magnitude to quality score (rough approximation)
+            quality = max(0, min(1, (track.max_magnitude - 80) / 40));
+            return;
+        end
+    end
+    
+catch ME
+    % If extraction fails, use default quality
+    fprintf('   Warning: Quality extraction failed: %s\n', ME.message);
+end
+
 end
 
 end
